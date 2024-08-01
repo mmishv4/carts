@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.config import Config
 from app.domain.cart_config.dto import CartConfigDTO
 from app.domain.cart_config.entities import CartConfig
 from app.domain.cart_coupons.dto import CartCouponDTO
@@ -40,6 +41,7 @@ class CartsRepository(ICartsRepository):
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self.graph_name = Config().DB.graph_name
 
     async def create(self, cart: Cart) -> Cart:
         """
@@ -58,21 +60,10 @@ class CartsRepository(ICartsRepository):
         except IntegrityError:
             raise ActiveCartAlreadyExistsError
 
-        stmt = text(
-            """
-            PREPARE cypher_stored_procedure(agtype) AS
-            SELECT *
-            FROM cypher(
-                'template', 
-                $$
-                    MERGE (n:Cart {id: $cart_id})
-                $$, 
-                $1
-            ) as (n agtype);
-            """
+        stmt = text("SELECT * FROM create_cart_func(:cart_id, :graph_name);")
+        await self._session.execute(
+            stmt.bindparams(cart_id=cart.id, graph_name=self.graph_name)
         )
-        await self._session.execute(stmt, params={"cart_id": cart.id})
-        await self._session.execute(text("DEALLOCATE cypher_stored_procedure;"))
 
         await update_context(cart_id=cart.id)
 
@@ -128,6 +119,10 @@ class CartsRepository(ICartsRepository):
 
         stmt = delete(models.CartItem).where(models.CartItem.cart_id == cart_id)
         await self._session.execute(stmt)
+        stmt = text("SELECT * FROM remove_cart_items_func(:cart_id, :graph_name);")
+        await self._session.execute(
+            stmt.bindparams(cart_id=cart_id, graph_name=self.graph_name)
+        )
 
     async def get_list(self, page_size: int, created_at: datetime) -> list[Cart]:
         """
@@ -211,6 +206,17 @@ class CartsRepository(ICartsRepository):
         result = await self._session.execute(stmt)
 
         return [(user_id, cart_id) for user_id, cart_id in result.all()]
+
+    async def get_cart_items_total_quantity(self, cart_id: UUID) -> float:
+        """
+        Calculates the total quantity (qty) of all CartItem nodes associated with a specified Cart node in the graph.
+        """
+
+        stmt = text("SELECT * FROM sum_cart_items_qty_func(:cart_id, :graph_name);")
+        result = await self._session.execute(
+            stmt.bindparams(cart_id=cart_id, graph_name=self.graph_name)
+        )
+        return float(result.scalar())
 
     async def _get_config(self) -> CartConfig:
         stmt = select(models.CartConfig)

@@ -86,8 +86,13 @@ async def test_ok(
 
 
 @pytest.mark.parametrize(
-    "dto",
-    [{"created_at": datetime.now() - timedelta(days=2)}],
+    ("dto", "cart"),
+    [
+        (
+            {"created_at": datetime.now() - timedelta(days=2)},
+            {"created_at": datetime.now()},
+        )
+    ],
     indirect=True,
 )
 async def test_empty_result(

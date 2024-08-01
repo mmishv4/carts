@@ -39,3 +39,7 @@ class ICartsRepository(ABC):
     @abstractmethod
     async def find_abandoned_cart_id_by_user_id(self) -> Mapping[UUID, int]:
         ...
+
+    @abstractmethod
+    async def get_cart_items_total_quantity(self, cart_id: UUID) -> float:
+        ...

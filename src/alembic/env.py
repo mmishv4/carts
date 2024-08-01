@@ -1,5 +1,6 @@
 import asyncio
 from logging.config import fileConfig
+from typing import MutableMapping
 
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -36,13 +37,14 @@ target_metadata = metadata
 config.set_main_option("sqlalchemy.url", str(app_config.DB.dsn))
 
 
-def include_name(_name: str, _type: str, parent_names: dict[str, str]) -> bool:
+def include_name(_name: str | None, _type: str, parent_names: MutableMapping) -> bool:
     # useful with 3rd party extensions and their internal schemas and tables
 
     if "schema_name" not in parent_names:
         return True
-
-    return parent_names["schema_name"] not in (app_config.DB.graph_name, "ag_catalog")
+    schema = parent_names["schema_name"]
+    is_internal = _type == "table" and f"{schema}.{_name}" not in target_metadata.tables
+    return not is_internal
 
 
 def run_migrations_offline() -> None:
