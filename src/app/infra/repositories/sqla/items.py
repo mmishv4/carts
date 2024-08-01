@@ -1,10 +1,11 @@
 from logging import getLogger
 
-from sqlalchemy import delete, update, text
+from sqlalchemy import delete, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Config
 from app.domain.cart_items.entities import CartItem
 from app.domain.carts.entities import Cart
 from app.domain.interfaces.repositories.items.exceptions import ItemAlreadyExists
@@ -22,6 +23,7 @@ class ItemsRepository(IItemsRepository):
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self.graph_name = Config().DB.graph_name
 
     async def add_item(self, item: CartItem) -> None:
         """Inserts a new CartItem object into the database."""
@@ -39,25 +41,17 @@ class ItemsRepository(IItemsRepository):
             await self._session.execute(stmt)
         except IntegrityError as err:
             raise ItemAlreadyExists(str(err)) from err
-
         stmt = text(
-            """
-            PREPARE cypher_stored_procedure(agtype) AS
-            SELECT *
-            FROM cypher(
-                'template',
-                $$
-                    MATCH (c:Cart) WHERE c.id = $cart_id
-                    MERGE (i:CartItem {id: $item_id})
-                    MERGE (c)-[r:CONTAINS]->(i)
-                    RETURN i
-                $$,
-                $1
-            ) as (i agtype);
-            """
+            "SELECT * FROM add_cart_item_func(:cart_id, :item_id, :item_qty, :graph_name);"
         )
-        await self._session.execute(stmt, params={"cart_id": item.cart_id, "item_id": item.id})
-        await self._session.execute(text("DEALLOCATE cypher_stored_procedure;"))
+        await self._session.execute(
+            stmt.bindparams(
+                cart_id=item.cart_id,
+                item_id=item.id,
+                graph_name=self.graph_name,
+                item_qty=item.qty,
+            )
+        )
 
     async def update_item(self, item: CartItem) -> CartItem:
         """Updates an existing CartItem object in the database."""
@@ -87,18 +81,8 @@ class ItemsRepository(IItemsRepository):
         await self._session.execute(stmt)
 
         stmt = text(
-            """
-            PREPARE cypher_stored_procedure(agtype) AS
-            SELECT *
-            FROM cypher(
-                'template', 
-                $$
-                    MATCH (c:Cart)-[r:CONTAINS]->(i:CartItem) 
-                    WHERE c.id = $cart_id AND i.id = $item_id
-                    DELETE r
-                $$, 
-                $1, $2
-            ) as (n agtype);
-            """
+            "SELECT * FROM remove_cart_item_func(:cart_id, :item_id, :graph_name);"
         )
-        await self._session.execute(stmt, params={"cart_id": cart.id, "item_id": item_id})
+        await self._session.execute(
+            stmt.bindparams(cart_id=cart.id, item_id=item_id, graph_name=self.graph_name)
+        )

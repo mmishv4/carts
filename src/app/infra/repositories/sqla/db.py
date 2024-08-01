@@ -36,7 +36,6 @@ class Database:
                     **config.server_settings,
                     "application_name": config.app_name,
                     "timezone": config.timezone,
-
                     # useful with 3rd party extensions and their internal schemas and tables
                     "options": "-c search_path=ag_catalog,content,public",
                 },
